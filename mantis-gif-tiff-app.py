@@ -40,6 +40,10 @@ def write_energies(path: Path, energies: Iterable[str]) -> None:
     path.write_text("\n".join(str(e) for e in energies) + "\n", encoding="utf-8")
 
 
+def linear_energies(base_ev: float, step_ev: float, count: int) -> list[str]:
+    return [f"{base_ev + (i * step_ev):.12g}" for i in range(count)]
+
+
 def gif_comment_for_energies(energies: list[str]) -> bytes:
     text = ENERGY_HEADER + "\n" + "\n".join(energies) + "\n"
     return text.encode("utf-8")
@@ -113,6 +117,34 @@ def gif_to_tiff(gif_path: Path, energy_path: Path, output_tiff: Path | None = No
     frames = gif_frames(gif_path)
     energies = read_energies(energy_path)
     ensure_count(gif_path.name, len(frames), energies)
+    return gif_frames_to_tiff(gif_path, frames, energies, output_tiff)
+
+
+def gif_to_tiff_linear(
+    gif_path: Path,
+    base_ev: float,
+    step_ev: float,
+    output_tiff: Path | None = None,
+) -> tuple[Path, Path]:
+    frames = gif_frames(gif_path)
+    energies = linear_energies(base_ev, step_ev, len(frames))
+    return gif_frames_to_tiff(gif_path, frames, energies, output_tiff)
+
+
+def gif_to_tiff_only(gif_path: Path, output_tiff: Path | None = None) -> Path:
+    frames = gif_frames(gif_path)
+    if output_tiff is None:
+        output_tiff = gif_path.with_name(clean_stem(gif_path) + ".tif")
+    save_multipage_tiff(frames, output_tiff)
+    return output_tiff
+
+
+def gif_frames_to_tiff(
+    gif_path: Path,
+    frames: list[Image.Image],
+    energies: list[str],
+    output_tiff: Path | None = None,
+) -> tuple[Path, Path]:
     if output_tiff is None:
         output_tiff = gif_path.with_name(clean_stem(gif_path) + ".tif")
     output_txt = output_tiff.with_suffix(".txt")
@@ -137,26 +169,56 @@ def build_gui() -> None:
 
     root = tk.Tk()
     root.title("MANTiS GIF/TIFF Converter")
-    root.geometry("720x440")
+    root.geometry("780x540")
 
-    mode = tk.StringVar(value="gif_to_tiff")
+    mode = tk.StringVar(value="gif_to_tiff_txt")
     input_path = tk.StringVar()
     energy_path = tk.StringVar()
     output_path = tk.StringVar()
+    base_ev = tk.StringVar()
+    step_ev = tk.StringVar()
     status = tk.StringVar(value="Choose files, then convert.")
 
     def update_labels(*_args: object) -> None:
-        if mode.get() == "gif_to_tiff":
+        current = mode.get()
+        if current.startswith("gif_to_tiff"):
             input_label.configure(text="Input GIF stack")
             output_label.configure(text="Output TIFF")
-            convert_button.configure(text="Convert GIF + TXT -> TIFF + TXT")
+            output_hint.configure(text="Output is a multi-page TIFF. MANTiS needs a matching TXT for real analysis.")
+            if current == "gif_to_tiff_txt":
+                convert_button.configure(text="Convert GIF + energy TXT -> TIFF + TXT")
+                energy_label.configure(text="Energy TXT")
+                energy_entry.configure(state="normal")
+                energy_button.configure(state="normal")
+                base_entry.configure(state="disabled")
+                step_entry.configure(state="disabled")
+            elif current == "gif_to_tiff_linear":
+                convert_button.configure(text="Convert GIF -> TIFF + assumed linear TXT")
+                energy_label.configure(text="Energy TXT")
+                energy_entry.configure(state="disabled")
+                energy_button.configure(state="disabled")
+                base_entry.configure(state="normal")
+                step_entry.configure(state="normal")
+            else:
+                convert_button.configure(text="Convert GIF -> TIFF only")
+                energy_label.configure(text="Energy TXT")
+                energy_entry.configure(state="disabled")
+                energy_button.configure(state="disabled")
+                base_entry.configure(state="disabled")
+                step_entry.configure(state="disabled")
         else:
             input_label.configure(text="Input TIFF stack")
             output_label.configure(text="Output GIF")
-            convert_button.configure(text="Convert TIFF + TXT -> GIF with eV metadata")
+            output_hint.configure(text="Energy values come from the TXT you choose, then get embedded into the GIF.")
+            convert_button.configure(text="Convert TIFF + energy TXT -> GIF with eV metadata")
+            energy_label.configure(text="Energy TXT")
+            energy_entry.configure(state="normal")
+            energy_button.configure(state="normal")
+            base_entry.configure(state="disabled")
+            step_entry.configure(state="disabled")
 
     def choose_input() -> None:
-        if mode.get() == "gif_to_tiff":
+        if mode.get().startswith("gif_to_tiff"):
             filetypes = [("GIF files", "*.gif"), ("All files", "*.*")]
         else:
             filetypes = [("TIFF files", "*.tif *.tiff"), ("All files", "*.*")]
@@ -165,7 +227,7 @@ def build_gui() -> None:
             input_path.set(picked)
             if not output_path.get():
                 src = Path(picked)
-                if mode.get() == "gif_to_tiff":
+                if mode.get().startswith("gif_to_tiff"):
                     output_path.set(str(src.with_name(clean_stem(src) + ".tif")))
                 else:
                     output_path.set(str(src.with_suffix(".gif")))
@@ -179,7 +241,7 @@ def build_gui() -> None:
             energy_path.set(picked)
 
     def choose_output() -> None:
-        if mode.get() == "gif_to_tiff":
+        if mode.get().startswith("gif_to_tiff"):
             defaultextension = ".tif"
             filetypes = [("TIFF files", "*.tif"), ("All files", "*.*")]
         else:
@@ -197,14 +259,40 @@ def build_gui() -> None:
         try:
             if not input_path.get():
                 raise ValueError("Choose an input image stack first.")
-            if not energy_path.get():
-                raise ValueError("Choose the energy TXT file first.")
-            if mode.get() == "gif_to_tiff":
+            current = mode.get()
+            if current == "gif_to_tiff_txt":
+                if not energy_path.get():
+                    raise ValueError("Choose the energy TXT file first.")
                 output = Path(output_path.get()) if output_path.get() else None
                 tiff, txt = gif_to_tiff(Path(input_path.get()), Path(energy_path.get()), output)
                 status.set(f"Wrote {tiff.name} and {txt.name}")
                 messagebox.showinfo("Conversion complete", f"Wrote:\n{tiff}\n{txt}")
+            elif current == "gif_to_tiff_linear":
+                if not base_ev.get().strip() or not step_ev.get().strip():
+                    raise ValueError("Enter a base eV and step eV.")
+                output = Path(output_path.get()) if output_path.get() else None
+                tiff, txt = gif_to_tiff_linear(
+                    Path(input_path.get()),
+                    float(base_ev.get()),
+                    float(step_ev.get()),
+                    output,
+                )
+                status.set(f"Wrote {tiff.name} and assumed-energy {txt.name}")
+                messagebox.showinfo(
+                    "Conversion complete",
+                    f"Wrote:\n{tiff}\n{txt}\n\nEnergy values were generated from base + frame_index * step.",
+                )
+            elif current == "gif_to_tiff_only":
+                output = Path(output_path.get()) if output_path.get() else None
+                tiff = gif_to_tiff_only(Path(input_path.get()), output)
+                status.set(f"Wrote {tiff.name} without an energy TXT")
+                messagebox.showinfo(
+                    "Conversion complete",
+                    f"Wrote:\n{tiff}\n\nNo energy TXT was created. MANTiS may need energies for analysis.",
+                )
             else:
+                if not energy_path.get():
+                    raise ValueError("Choose the energy TXT file first.")
                 output = Path(output_path.get()) if output_path.get() else None
                 gif = tiff_to_gif(Path(input_path.get()), Path(energy_path.get()), output)
                 embedded = extract_energies_from_gif(gif)
@@ -250,44 +338,61 @@ def build_gui() -> None:
         row=0, column=0, columnspan=3, sticky="w", pady=(0, 14)
     )
 
-    ttk.Radiobutton(main, text="GIF + energy TXT -> MANTiS TIFF + TXT", variable=mode, value="gif_to_tiff").grid(
+    ttk.Radiobutton(main, text="GIF + energy TXT -> MANTiS TIFF + TXT", variable=mode, value="gif_to_tiff_txt").grid(
         row=1, column=0, columnspan=3, sticky="w"
     )
+    ttk.Radiobutton(main, text="GIF -> TIFF + assumed linear energy TXT", variable=mode, value="gif_to_tiff_linear").grid(
+        row=2, column=0, columnspan=3, sticky="w"
+    )
+    ttk.Radiobutton(main, text="GIF -> TIFF only, no energy TXT", variable=mode, value="gif_to_tiff_only").grid(
+        row=3, column=0, columnspan=3, sticky="w"
+    )
     ttk.Radiobutton(main, text="TIFF + energy TXT -> GIF with embedded eV metadata", variable=mode, value="tiff_to_gif").grid(
-        row=2, column=0, columnspan=3, sticky="w", pady=(0, 14)
+        row=4, column=0, columnspan=3, sticky="w", pady=(0, 14)
     )
     mode.trace_add("write", update_labels)
 
     input_label = ttk.Label(main, text="Input GIF stack")
-    input_label.grid(row=3, column=0, sticky="w", pady=6)
-    ttk.Entry(main, textvariable=input_path).grid(row=3, column=1, sticky="ew", padx=8)
-    ttk.Button(main, text="Browse", command=choose_input).grid(row=3, column=2, sticky="ew")
+    input_label.grid(row=5, column=0, sticky="w", pady=6)
+    ttk.Entry(main, textvariable=input_path).grid(row=5, column=1, sticky="ew", padx=8)
+    ttk.Button(main, text="Browse", command=choose_input).grid(row=5, column=2, sticky="ew")
 
-    ttk.Label(main, text="Energy TXT").grid(row=4, column=0, sticky="w", pady=6)
-    ttk.Entry(main, textvariable=energy_path).grid(row=4, column=1, sticky="ew", padx=8)
-    ttk.Button(main, text="Browse", command=choose_energy).grid(row=4, column=2, sticky="ew")
+    energy_label = ttk.Label(main, text="Energy TXT")
+    energy_label.grid(row=6, column=0, sticky="w", pady=6)
+    energy_entry = ttk.Entry(main, textvariable=energy_path)
+    energy_entry.grid(row=6, column=1, sticky="ew", padx=8)
+    energy_button = ttk.Button(main, text="Browse", command=choose_energy)
+    energy_button.grid(row=6, column=2, sticky="ew")
+
+    ttk.Label(main, text="Base eV").grid(row=7, column=0, sticky="w", pady=6)
+    base_entry = ttk.Entry(main, textvariable=base_ev)
+    base_entry.grid(row=7, column=1, sticky="ew", padx=8)
+    ttk.Label(main, text="Step eV per frame").grid(row=8, column=0, sticky="w", pady=6)
+    step_entry = ttk.Entry(main, textvariable=step_ev)
+    step_entry.grid(row=8, column=1, sticky="ew", padx=8)
 
     output_label = ttk.Label(main, text="Output TIFF")
-    output_label.grid(row=5, column=0, sticky="w", pady=6)
-    ttk.Entry(main, textvariable=output_path).grid(row=5, column=1, sticky="ew", padx=8)
-    ttk.Button(main, text="Browse", command=choose_output).grid(row=5, column=2, sticky="ew")
+    output_label.grid(row=9, column=0, sticky="w", pady=6)
+    ttk.Entry(main, textvariable=output_path).grid(row=9, column=1, sticky="ew", padx=8)
+    ttk.Button(main, text="Browse", command=choose_output).grid(row=9, column=2, sticky="ew")
 
     convert_button = ttk.Button(main, text="Convert GIF + TXT -> TIFF + TXT", command=convert)
-    convert_button.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(18, 8))
+    convert_button.grid(row=10, column=0, columnspan=3, sticky="ew", pady=(18, 8))
 
     ttk.Button(main, text="Extract embedded eV metadata from GIF", command=extract_metadata).grid(
-        row=7, column=0, columnspan=3, sticky="ew"
+        row=11, column=0, columnspan=3, sticky="ew"
     )
 
     ttk.Label(main, textvariable=status, foreground="#444").grid(
-        row=8, column=0, columnspan=3, sticky="w", pady=(18, 0)
+        row=12, column=0, columnspan=3, sticky="w", pady=(18, 0)
     )
 
-    ttk.Label(
+    output_hint = ttk.Label(
         main,
         text="The energy TXT must contain exactly one eV value per image frame/page.",
         foreground="#666",
-    ).grid(row=9, column=0, columnspan=3, sticky="w", pady=(8, 0))
+    )
+    output_hint.grid(row=13, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     main.columnconfigure(1, weight=1)
     update_labels()
@@ -298,10 +403,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command")
 
-    p1 = sub.add_parser("gif-to-tiff", help="Convert animated GIF plus energy TXT to TIFF plus TXT")
+    p1 = sub.add_parser("gif-to-tiff", help="Convert animated GIF to TIFF, with optional energy TXT")
     p1.add_argument("gif")
-    p1.add_argument("energies")
+    p1.add_argument("energies", nargs="?", help="Existing energy TXT with one value per GIF frame")
     p1.add_argument("-o", "--output")
+    p1.add_argument("--base-ev", type=float, help="Generate energies from this starting eV")
+    p1.add_argument("--step-ev", type=float, help="Generate energies using this eV step per frame")
+    p1.add_argument("--no-energy-file", action="store_true", help="Write only the TIFF stack")
 
     p2 = sub.add_parser("tiff-to-gif", help="Convert TIFF plus energy TXT to GIF with embedded eV metadata")
     p2.add_argument("tiff")
@@ -319,13 +427,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         if args.command == "gif-to-tiff":
-            tiff, txt = gif_to_tiff(
-                Path(args.gif),
-                Path(args.energies),
-                Path(args.output) if args.output else None,
-            )
-            print(f"Wrote {tiff}")
-            print(f"Wrote {txt}")
+            output = Path(args.output) if args.output else None
+            if args.no_energy_file:
+                tiff = gif_to_tiff_only(Path(args.gif), output)
+                print(f"Wrote {tiff}")
+                print("No energy TXT written")
+            elif args.base_ev is not None or args.step_ev is not None:
+                if args.base_ev is None or args.step_ev is None:
+                    raise ValueError("--base-ev and --step-ev must be used together")
+                tiff, txt = gif_to_tiff_linear(Path(args.gif), args.base_ev, args.step_ev, output)
+                print(f"Wrote {tiff}")
+                print(f"Wrote {txt}")
+            else:
+                if not args.energies:
+                    raise ValueError("provide an energy TXT, or use --base-ev/--step-ev, or --no-energy-file")
+                tiff, txt = gif_to_tiff(Path(args.gif), Path(args.energies), output)
+                print(f"Wrote {tiff}")
+                print(f"Wrote {txt}")
         elif args.command == "tiff-to-gif":
             gif = tiff_to_gif(
                 Path(args.tiff),
