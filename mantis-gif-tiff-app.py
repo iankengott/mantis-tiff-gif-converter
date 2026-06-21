@@ -94,6 +94,16 @@ def save_multipage_tiff(frames: list[Image.Image], output_tiff: Path) -> None:
     )
 
 
+def pair_output_paths(gif_path: Path, output_tiff: Path | None = None) -> tuple[Path, Path]:
+    if output_tiff is None:
+        folder = gif_path.with_name(clean_stem(gif_path))
+        file_stem = folder.name
+    else:
+        folder = output_tiff.with_suffix("")
+        file_stem = output_tiff.stem
+    return folder / f"{file_stem}.tif", folder / f"{file_stem}.txt"
+
+
 def save_animated_gif(frames: list[Image.Image], energies: list[str], output_gif: Path) -> None:
     output_gif.parent.mkdir(parents=True, exist_ok=True)
     frames[0].save(
@@ -145,9 +155,7 @@ def gif_frames_to_tiff(
     energies: list[str],
     output_tiff: Path | None = None,
 ) -> tuple[Path, Path]:
-    if output_tiff is None:
-        output_tiff = gif_path.with_name(clean_stem(gif_path) + ".tif")
-    output_txt = output_tiff.with_suffix(".txt")
+    output_tiff, output_txt = pair_output_paths(gif_path, output_tiff)
     save_multipage_tiff(frames, output_tiff)
     write_energies(output_txt, energies)
     return output_tiff, output_txt
@@ -184,9 +192,9 @@ def build_gui() -> None:
         if current.startswith("gif_to_tiff"):
             input_label.configure(text="Input GIF stack")
             output_label.configure(text="Output TIFF")
-            output_hint.configure(text="Output is a multi-page TIFF. MANTiS needs a matching TXT for real analysis.")
             if current == "gif_to_tiff_txt":
                 convert_button.configure(text="Convert GIF + energy TXT -> TIFF + TXT")
+                output_hint.configure(text="Creates a folder containing the TIFF and matching TXT. The output name is used as the folder/base name.")
                 energy_label.configure(text="Energy TXT")
                 energy_entry.configure(state="normal")
                 energy_button.configure(state="normal")
@@ -194,6 +202,7 @@ def build_gui() -> None:
                 step_entry.configure(state="disabled")
             elif current == "gif_to_tiff_linear":
                 convert_button.configure(text="Convert GIF -> TIFF + assumed linear TXT")
+                output_hint.configure(text="Creates a folder containing the TIFF and generated TXT. The output name is used as the folder/base name.")
                 energy_label.configure(text="Energy TXT")
                 energy_entry.configure(state="disabled")
                 energy_button.configure(state="disabled")
@@ -201,6 +210,7 @@ def build_gui() -> None:
                 step_entry.configure(state="normal")
             else:
                 convert_button.configure(text="Convert GIF -> TIFF only")
+                output_hint.configure(text="Creates one TIFF file directly at the output path. No folder is made.")
                 energy_label.configure(text="Energy TXT")
                 energy_entry.configure(state="disabled")
                 energy_button.configure(state="disabled")
@@ -266,7 +276,7 @@ def build_gui() -> None:
                 output = Path(output_path.get()) if output_path.get() else None
                 tiff, txt = gif_to_tiff(Path(input_path.get()), Path(energy_path.get()), output)
                 status.set(f"Wrote {tiff.name} and {txt.name}")
-                messagebox.showinfo("Conversion complete", f"Wrote:\n{tiff}\n{txt}")
+                messagebox.showinfo("Conversion complete", f"Wrote folder:\n{tiff.parent}\n\nFiles:\n{tiff.name}\n{txt.name}")
             elif current == "gif_to_tiff_linear":
                 if not base_ev.get().strip() or not step_ev.get().strip():
                     raise ValueError("Enter a base eV and step eV.")
@@ -280,7 +290,7 @@ def build_gui() -> None:
                 status.set(f"Wrote {tiff.name} and assumed-energy {txt.name}")
                 messagebox.showinfo(
                     "Conversion complete",
-                    f"Wrote:\n{tiff}\n{txt}\n\nEnergy values were generated from base + frame_index * step.",
+                    f"Wrote folder:\n{tiff.parent}\n\nFiles:\n{tiff.name}\n{txt.name}\n\nEnergy values were generated from base + frame_index * step.",
                 )
             elif current == "gif_to_tiff_only":
                 output = Path(output_path.get()) if output_path.get() else None
@@ -436,12 +446,14 @@ def main(argv: list[str] | None = None) -> int:
                 if args.base_ev is None or args.step_ev is None:
                     raise ValueError("--base-ev and --step-ev must be used together")
                 tiff, txt = gif_to_tiff_linear(Path(args.gif), args.base_ev, args.step_ev, output)
+                print(f"Wrote folder {tiff.parent}")
                 print(f"Wrote {tiff}")
                 print(f"Wrote {txt}")
             else:
                 if not args.energies:
                     raise ValueError("provide an energy TXT, or use --base-ev/--step-ev, or --no-energy-file")
                 tiff, txt = gif_to_tiff(Path(args.gif), Path(args.energies), output)
+                print(f"Wrote folder {tiff.parent}")
                 print(f"Wrote {tiff}")
                 print(f"Wrote {txt}")
         elif args.command == "tiff-to-gif":

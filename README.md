@@ -44,6 +44,22 @@ If your Python does not have Tkinter, use the command-line commands instead.
 
 The energy file must contain exactly one energy value per GIF frame or TIFF page. Blank lines and lines beginning with `#` are ignored.
 
+Conversions that create both a TIFF and TXT place those files in a folder. For example:
+
+```bash
+./mantis-gif-tiff-app gif-to-tiff input.gif energies.txt -o sample.tif
+```
+
+writes:
+
+```text
+sample/
+  sample.tif
+  sample.txt
+```
+
+Single-file conversions write the chosen output file directly.
+
 ## MANTiS TIFF Format
 
 MANTiS expects a multi-page TIFF plus a same-basename text file:
@@ -69,7 +85,7 @@ If the scan used a constant energy step, you can generate an assumed linear ener
 ./mantis-gif-tiff-app gif-to-tiff input.gif --base-ev 700 --step-ev 0.2 -o output.tif
 ```
 
-That writes values as `base_ev + frame_index * step_ev`. Do not use assumed energies for quantitative analysis unless they match the acquisition settings.
+That creates an `output/` folder containing `output.tif` and `output.txt`. The energy values are written as `base_ev + frame_index * step_ev`. Do not use assumed energies for quantitative analysis unless they match the acquisition settings.
 
 ## GIF Metadata Format
 
