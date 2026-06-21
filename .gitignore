@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Generated stack outputs
+*.tif
+*.tiff
+*.gif
+*.txt

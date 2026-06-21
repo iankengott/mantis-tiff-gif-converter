@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MANTiS GIF/TIFF Converter
+GenericName=GIF TIFF Energy Converter
+Comment=Convert aXis GIF stacks and MANTiS TIFF stacks with eV metadata
+Exec=mantis-gif-tiff-app
+Terminal=false
+Categories=Science;Education;
+StartupNotify=true
