@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -13,12 +14,35 @@ from PIL import Image, ImageSequence
 
 
 ENERGY_HEADER = "MANTIS_EV_LIST"
+SETTINGS_PATH = Path.home() / ".config" / "mantis-gif-tiff-converter" / "settings.json"
 
 
 def clean_stem(path: Path) -> str:
     stem = path.stem
     stem = re.sub(r"\s*\(\d+\)$", "", stem)
     return stem.replace(" ", "_")
+
+
+def load_settings() -> dict[str, str]:
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    return {str(key): str(value) for key, value in data.items()}
+
+
+def save_settings(settings: dict[str, str]) -> None:
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def existing_directory(path_text: str) -> str:
+    path = Path(path_text).expanduser()
+    if path.is_dir():
+        return str(path)
+    if path.parent.is_dir():
+        return str(path.parent)
+    return str(Path.cwd())
 
 
 def read_energies(path: Path) -> list[str]:
@@ -179,13 +203,32 @@ def build_gui() -> None:
     root.title("MANTiS GIF/TIFF Converter")
     root.geometry("780x540")
 
-    mode = tk.StringVar(value="gif_to_tiff_txt")
-    input_path = tk.StringVar()
-    energy_path = tk.StringVar()
-    output_path = tk.StringVar()
-    base_ev = tk.StringVar()
-    step_ev = tk.StringVar()
+    settings = load_settings()
+    mode = tk.StringVar(value=settings.get("mode", "gif_to_tiff_txt"))
+    input_path = tk.StringVar(value=settings.get("input_path", ""))
+    energy_path = tk.StringVar(value=settings.get("energy_path", ""))
+    output_path = tk.StringVar(value=settings.get("output_path", ""))
+    base_ev = tk.StringVar(value=settings.get("base_ev", ""))
+    step_ev = tk.StringVar(value=settings.get("step_ev", ""))
     status = tk.StringVar(value="Choose files, then convert.")
+
+    def remember_path(path_text: str) -> None:
+        if path_text:
+            settings["last_dir"] = existing_directory(path_text)
+        settings["input_path"] = input_path.get()
+        settings["energy_path"] = energy_path.get()
+        settings["output_path"] = output_path.get()
+        settings["base_ev"] = base_ev.get()
+        settings["step_ev"] = step_ev.get()
+        settings["mode"] = mode.get()
+        save_settings(settings)
+
+    def dialog_dir() -> str:
+        return existing_directory(settings.get("last_dir", "") or input_path.get() or energy_path.get() or output_path.get())
+
+    def close_app() -> None:
+        remember_path(settings.get("last_dir", ""))
+        root.destroy()
 
     def update_labels(*_args: object) -> None:
         current = mode.get()
@@ -232,23 +275,31 @@ def build_gui() -> None:
             filetypes = [("GIF files", "*.gif"), ("All files", "*.*")]
         else:
             filetypes = [("TIFF files", "*.tif *.tiff"), ("All files", "*.*")]
-        picked = filedialog.askopenfilename(title="Choose input image stack", filetypes=filetypes)
+        picked = filedialog.askopenfilename(
+            title="Choose input image stack",
+            filetypes=filetypes,
+            initialdir=dialog_dir(),
+        )
         if picked:
             input_path.set(picked)
+            remember_path(picked)
             if not output_path.get():
                 src = Path(picked)
                 if mode.get().startswith("gif_to_tiff"):
                     output_path.set(str(src.with_name(clean_stem(src) + ".tif")))
                 else:
                     output_path.set(str(src.with_suffix(".gif")))
+                remember_path(output_path.get())
 
     def choose_energy() -> None:
         picked = filedialog.askopenfilename(
             title="Choose energy TXT file",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            initialdir=dialog_dir(),
         )
         if picked:
             energy_path.set(picked)
+            remember_path(picked)
 
     def choose_output() -> None:
         if mode.get().startswith("gif_to_tiff"):
@@ -259,11 +310,13 @@ def build_gui() -> None:
             filetypes = [("GIF files", "*.gif"), ("All files", "*.*")]
         picked = filedialog.asksaveasfilename(
             title="Choose output file",
+            initialdir=dialog_dir(),
             defaultextension=defaultextension,
             filetypes=filetypes,
         )
         if picked:
             output_path.set(picked)
+            remember_path(picked)
 
     def convert() -> None:
         try:
@@ -319,9 +372,11 @@ def build_gui() -> None:
         picked = filedialog.askopenfilename(
             title="Choose GIF with embedded eV metadata",
             filetypes=[("GIF files", "*.gif"), ("All files", "*.*")],
+            initialdir=dialog_dir(),
         )
         if not picked:
             return
+        remember_path(picked)
         try:
             energies = extract_energies_from_gif(Path(picked))
             if not energies:
@@ -330,12 +385,13 @@ def build_gui() -> None:
             out = filedialog.asksaveasfilename(
                 title="Save extracted energy TXT",
                 initialfile=Path(default).name,
-                initialdir=str(Path(default).parent),
+                initialdir=existing_directory(settings.get("last_dir", "") or str(Path(default).parent)),
                 defaultextension=".txt",
                 filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
             )
             if out:
                 write_energies(Path(out), energies)
+                remember_path(out)
                 status.set(f"Extracted {len(energies)} eV values to {Path(out).name}")
         except Exception as exc:
             status.set(str(exc))
@@ -361,6 +417,7 @@ def build_gui() -> None:
         row=4, column=0, columnspan=3, sticky="w", pady=(0, 14)
     )
     mode.trace_add("write", update_labels)
+    mode.trace_add("write", lambda *_args: remember_path(settings.get("last_dir", "")))
 
     input_label = ttk.Label(main, text="Input GIF stack")
     input_label.grid(row=5, column=0, sticky="w", pady=6)
@@ -405,6 +462,9 @@ def build_gui() -> None:
     output_hint.grid(row=13, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     main.columnconfigure(1, weight=1)
+    base_ev.trace_add("write", lambda *_args: remember_path(settings.get("last_dir", "")))
+    step_ev.trace_add("write", lambda *_args: remember_path(settings.get("last_dir", "")))
+    root.protocol("WM_DELETE_WINDOW", close_app)
     update_labels()
     root.mainloop()
 
