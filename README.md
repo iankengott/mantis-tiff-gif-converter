@@ -1,14 +1,14 @@
 # MANTiS TIFF/GIF Converter
 
-A small GUI and command-line converter for moving between aXis-style animated GIF stacks and MANTiS-friendly multi-page TIFF stacks.
+Small converter I made for moving between animated GIF stacks, MANTiS TIFF stacks, and the energy text files that go with them.
 
-It supports:
+Main things it does:
 
-- GIF stack + energy `.txt` -> multi-page MANTiS `.tif` + same-basename `.txt`
-- GIF stack -> multi-page `.tif` only, with no energy file
-- GIF stack -> multi-page `.tif` + assumed linear energy `.txt`
-- TIFF stack + energy `.txt` -> animated `.gif` with the eV list embedded in GIF comment metadata
-- Extracting embedded eV metadata from a GIF back into a `.txt`
+- GIF + energy `.txt` -> MANTiS-style TIFF stack + matching `.txt`
+- GIF -> TIFF only, if the energies are not known yet
+- GIF -> TIFF + generated linear energy list
+- TIFF + energy `.txt` -> animated GIF with the eV list embedded in the GIF comment metadata
+- Pull the embedded eV list back out of a GIF made by this tool
 
 ## Requirements
 
@@ -16,7 +16,7 @@ It supports:
 - Pillow
 - Tkinter, for the GUI
 
-On many Linux systems Tkinter is packaged separately from Python. The command-line mode only needs Pillow.
+Tkinter is sometimes packaged separately on Linux. The command-line mode only needs Pillow.
 
 ## Install Dependency
 
@@ -42,9 +42,9 @@ If your Python does not have Tkinter, use the command-line commands instead.
 ./mantis-gif-tiff-app extract-energies output.gif -o extracted_energies.txt
 ```
 
-The energy file must contain exactly one energy value per GIF frame or TIFF page. Blank lines and lines beginning with `#` are ignored.
+The energy file needs one eV value per GIF frame or TIFF page. Blank lines and lines starting with `#` are ignored.
 
-Conversions that create both a TIFF and TXT place those files in a folder. For example:
+When a conversion makes both a TIFF and TXT, it puts them together in a folder. For example:
 
 ```bash
 ./mantis-gif-tiff-app gif-to-tiff input.gif energies.txt -o sample.tif
@@ -58,38 +58,38 @@ sample/
   sample.txt
 ```
 
-Single-file conversions write the chosen output file directly.
+Single-file conversions just write the file you picked.
 
 ## MANTiS TIFF Format
 
-MANTiS expects a multi-page TIFF plus a same-basename text file:
+For TIFF stacks, MANTiS expects a multi-page TIFF plus a same-basename text file:
 
 ```text
 sample.tif
 sample.txt
 ```
 
-The `.txt` file should contain one photon energy in eV per line, in the same order as the image pages.
+The `.txt` file has one photon energy in eV per line, in the same order as the TIFF pages.
 
-TIFF files can technically contain metadata tags, but MANTiS's documented TIFF workflow uses the separate same-basename `.txt` energy list. This tool therefore treats TIFF + TXT as the reliable MANTiS pair.
+TIFF can technically have metadata tags, but MANTiS's documented TIFF workflow uses the separate `.txt` energy list. For this workflow I treat TIFF + TXT as the pair that matters.
 
-If you do not know the energies yet, you can still create a TIFF-only stack for inspection:
+If the energies are not known yet, make a TIFF-only stack for inspection:
 
 ```bash
 ./mantis-gif-tiff-app gif-to-tiff input.gif --no-energy-file -o output.tif
 ```
 
-If the scan used a constant energy step, you can generate an assumed linear energy list:
+If the scan used a constant energy step, generate a temporary linear energy list:
 
 ```bash
 ./mantis-gif-tiff-app gif-to-tiff input.gif --base-ev 700 --step-ev 0.2 -o output.tif
 ```
 
-That creates an `output/` folder containing `output.tif` and `output.txt`. The energy values are written as `base_ev + frame_index * step_ev`. Do not use assumed energies for quantitative analysis unless they match the acquisition settings.
+That creates an `output/` folder containing `output.tif` and `output.txt`. The values are `base_ev + frame_index * step_ev`. Do not use guessed energies for real analysis unless they match the acquisition settings.
 
 ## GIF Metadata Format
 
-When converting TIFF -> GIF, this tool stores the eV list in a GIF comment extension:
+When converting TIFF -> GIF, the eV list is stored in a GIF comment extension:
 
 ```text
 MANTIS_EV_LIST
@@ -98,4 +98,4 @@ MANTIS_EV_LIST
 700.4
 ```
 
-Standard aXis2000 GIF exports may not include this metadata. This tool can preserve eV data in GIFs it creates, but it cannot recover energies that were not present in the source file.
+Normal aXis2000 GIF exports may not have this metadata. This can preserve eV data in GIFs it creates, but it cannot recover energies that were never in the source file.
